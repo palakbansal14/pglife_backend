@@ -9,3 +9,5 @@ cloudinary==1.39.0
 twilio==8.13.0
 Werkzeug==3.0.1
 dnspython==2.6.1
+certifi
+gunicorn==21.2.0

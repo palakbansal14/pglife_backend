@@ -8,6 +8,9 @@ from utils.helpers import serialize, paginate
 from config.db import upload_image, delete_image
 from middleware.auth_middleware import get_current_user
 
+# Credits required to post a new listing (must match credits_controller.py)
+LISTING_COST = 15
+
 
 def get_db():
     return current_app.mongo.db
@@ -56,9 +59,10 @@ def get_listings():
     cursor = db.listings.find(query).sort(sort).skip((page - 1) * limit).limit(limit)
     listings = []
     for l in cursor:
-        # Attach owner info
-        owner = db.users.find_one({"_id": l.get("owner_id")}, {"name": 1, "phone": 1, "owner_profile": 1})
+        # Listing cards: show owner name only — phone/address are gated behind unlock
+        owner = db.users.find_one({"_id": l.get("owner_id")}, {"name": 1, "owner_profile": 1})
         l["owner"] = owner
+        l.pop("address", None)  # never expose full address in listing cards
         listings.append(serialize(l))
 
     return jsonify({
@@ -94,6 +98,7 @@ def get_map_listings():
 
 # ── GET /api/listings/<id> ───────────────────────────────
 def get_listing(listing_id):
+    from controllers.credits_controller import UNLOCK_COST
     db = get_db()
     try:
         oid = ObjectId(listing_id)
@@ -108,16 +113,57 @@ def get_listing(listing_id):
     if not listing:
         return jsonify({"success": False, "message": "Listing not found"}), 404
 
-    owner = db.users.find_one({"_id": listing.get("owner_id")}, {"name": 1, "phone": 1, "avatar": 1, "owner_profile": 1})
+    owner = db.users.find_one(
+        {"_id": listing.get("owner_id")},
+        {"name": 1, "phone": 1, "avatar": 1, "owner_profile": 1}
+    )
     listing["owner"] = owner
 
-    return jsonify({"success": True, "listing": serialize(listing)}), 200
+    listing_data = serialize(listing)
+
+    # ── Access control: hide address & phone unless unlocked ──
+    user_id = get_jwt_identity()  # None if request has no JWT (optional_auth)
+    is_unlocked = False
+
+    if user_id:
+        # Owner always sees their own listing in full
+        if str(listing.get("owner_id")) == user_id:
+            is_unlocked = True
+        else:
+            unlock = db.unlocks.find_one({
+                "user_id": ObjectId(user_id),
+                "listing_id": oid,
+            })
+            is_unlocked = unlock is not None
+
+    if not is_unlocked:
+        listing_data.pop("address", None)
+        if listing_data.get("owner"):
+            listing_data["owner"].pop("phone", None)
+        listing_data["is_locked"] = True
+        listing_data["unlock_cost"] = UNLOCK_COST
+    else:
+        listing_data["is_locked"] = False
+
+    return jsonify({"success": True, "listing": listing_data}), 200
 
 
 # ── POST /api/listings ───────────────────────────────────
 def create_listing():
     db = get_db()
     user = get_current_user()
+
+    # Check owner has enough credits to post a listing
+    current_credits = user.get("credits", 0)
+    if current_credits < LISTING_COST:
+        return jsonify({
+            "success": False,
+            "message": f"Insufficient credits. Posting a listing costs {LISTING_COST} credits. "
+                       f"You have {current_credits} credits.",
+            "required": LISTING_COST,
+            "available": current_credits,
+        }), 402
+
     data = request.form.to_dict()
     files = request.files.getlist("images")
 
@@ -160,12 +206,12 @@ def create_listing():
         "city": data.get("city", ""),
         "locality": data.get("locality", ""),
         "address": data.get("address", ""),
-        "monthly_rent": int(data.get("monthlyRent", 0)),
-        "security_deposit": int(data.get("securityDeposit", 0)),
+        "monthly_rent": int(data.get("monthlyRent") or 0),
+        "security_deposit": int(data.get("securityDeposit") or 0),
         "pg_type": data.get("pgType", "PG"),
         "gender_preference": data.get("genderPreference", "Any"),
         "sharing_type": sharing_type,
-        "available_rooms": int(data.get("availableRooms", 0)),
+        "available_rooms": int(data.get("availableRooms") or 0),
         "amenities": amenities,
         "house_rules": house_rules,
         "images": images,
@@ -180,8 +226,16 @@ def create_listing():
     }
 
     result = db.listings.insert_one(doc)
+
+    # Deduct credits from the owner after successful listing creation
+    db.users.update_one({"_id": user["_id"]}, {"$inc": {"credits": -LISTING_COST}})
+
     new_listing = db.listings.find_one({"_id": result.inserted_id})
-    return jsonify({"success": True, "listing": serialize(new_listing)}), 201
+    return jsonify({
+        "success": True,
+        "listing": serialize(new_listing),
+        "credits_remaining": current_credits - LISTING_COST,
+    }), 201
 
 
 # ── PUT /api/listings/<id> ───────────────────────────────

@@ -29,63 +29,92 @@ def check_user():
 def send_otp():
     data = request.get_json()
     phone = data.get("phone", "").strip()
+    country_code = data.get("countryCode", "+91").strip()
 
     if not phone or not re.match(r"^\d{10}$", phone):
         return jsonify({"success": False, "message": "Valid 10-digit phone required"}), 400
 
-    db = get_db()
-    otp = generate_otp()
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    full_phone = f"{country_code}{phone}"
 
-    # Delete old OTPs for this phone
-    db.otps.delete_many({"phone": phone})
-    db.otps.insert_one({"phone": phone, "otp": otp, "expires_at": expires_at})
+    twilio_sid   = os.getenv("TWILIO_ACCOUNT_SID")
+    twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
+    verify_sid   = os.getenv("TWILIO_VERIFY_SERVICE_SID")
 
-    print(f"[DEV] OTP for {phone}: {otp}")
-    return jsonify({"success": True, "message": "OTP sent successfully", "otp": otp}), 200
+    try:
+        twilio_client = TwilioClient(twilio_sid, twilio_token)
+        twilio_client.verify.v2.services(verify_sid).verifications.create(
+            to=full_phone, channel="sms"
+        )
+    except Exception as e:
+        print(f"[Twilio Error] {e}")
+        return jsonify({"success": False, "message": "Failed to send OTP. Try again."}), 500
+
+    return jsonify({"success": True, "message": "OTP sent successfully"}), 200
 
 
 # ── POST /api/auth/verify-otp ───────────────────────────
 def verify_otp():
     data = request.get_json()
-    phone = data.get("phone", "").strip()
-    otp   = data.get("otp", "").strip()
-    name  = data.get("name", "").strip()
-    role  = data.get("role", "seeker")
+    phone        = data.get("phone", "").strip()
+    otp          = data.get("otp", "").strip()
+    name         = data.get("name", "").strip()
+    role         = data.get("role", "seeker")
+    country_code = data.get("countryCode", "+91").strip()
 
     if not phone or not otp:
         return jsonify({"success": False, "message": "Phone and OTP required"}), 400
 
+    full_phone = f"{country_code}{phone}"
     db = get_db()
 
     user = db.users.find_one({"phone": phone})
     is_new_user = user is None
 
-    # If new user and name provided — skip OTP re-verify (already verified in step 2)
-    if is_new_user and name:
-        pass
-    else:
-        # Verify OTP from MongoDB
-        otp_doc = db.otps.find_one({"phone": phone, "otp": otp})
-        if not otp_doc or otp_doc["expires_at"] < datetime.utcnow():
+    # Verify OTP via Twilio Verify
+    try:
+        twilio_client = TwilioClient(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+        check = twilio_client.verify.v2.services(os.getenv("TWILIO_VERIFY_SERVICE_SID")) \
+                    .verification_checks.create(to=full_phone, code=otp)
+        if check.status != "approved":
             return jsonify({"success": False, "message": "Invalid or expired OTP"}), 400
-        db.otps.delete_many({"phone": phone})
+    except Exception as e:
+        print(f"[Twilio Verify Error] {e}")
+        return jsonify({"success": False, "message": "OTP verification failed"}), 400
 
     if is_new_user:
         if not name:
             return jsonify({"success": True, "isNewUser": True}), 200
+        clean_role = role if role in ["seeker", "owner"] else "seeker"
+        # Owners get 15 free credits (enough for 1 free listing to try the platform).
+        # Seekers get 5 free credits (enough to unlock a couple of contacts).
+        signup_credits = 15 if clean_role == "owner" else 5
         user_doc = {
             "name": name,
             "phone": phone,
             "email": "",
-            "role": role if role in ["seeker", "owner"] else "seeker",
+            "role": clean_role,
             "avatar": "",
+            "credits": signup_credits,
             "wishlist": [],
             "owner_profile": {"is_verified": False},
             "created_at": datetime.utcnow(),
         }
         result = db.users.insert_one(user_doc)
         user = db.users.find_one({"_id": result.inserted_id})
+
+    # Existing user: if they logged in via "List Your PG" (role=owner), upgrade their role
+    if not is_new_user and role == "owner" and user.get("role") != "owner":
+        extra_credits = 10  # top-up so they can post (owners need 15, seekers got 5)
+        db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"role": "owner"}, "$inc": {"credits": extra_credits}}
+        )
+        user = db.users.find_one({"_id": user["_id"]})
+
+    # Ensure existing users (created before credits system) have a credits field
+    if user.get("credits") is None:
+        db.users.update_one({"_id": user["_id"]}, {"$set": {"credits": 5}})
+        user["credits"] = 5
 
     token = create_access_token(identity=str(user["_id"]))
 
@@ -139,5 +168,6 @@ def _format_user(user):
         "email": user.get("email", ""),
         "role": user.get("role", "seeker"),
         "avatar": user.get("avatar", ""),
+        "credits": user.get("credits", 0),
         "owner_profile": user.get("owner_profile", {}),
     }

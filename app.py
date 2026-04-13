@@ -1,22 +1,38 @@
 from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
-from flask_pymongo import PyMongo
+from pymongo import MongoClient
 from dotenv import load_dotenv
+import certifi
 import os
 
 load_dotenv()
 
+
 app = Flask(__name__)
+app.url_map.strict_slashes = False
 
 # ── Config ──────────────────────────────────────────────
-app.config["MONGO_URI"] = os.getenv("MONGO_URI")
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "change-this-secret")
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False  # No expiry (or set timedelta)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB upload limit
 
+# ── MongoDB ──────────────────────────────────────────────
+_mongo_client = MongoClient(
+    os.getenv("MONGO_URI"),
+    tls=True,
+    tlsAllowInvalidCertificates=True,
+    tlsAllowInvalidHostnames=True,
+)
+
+class _MongoWrapper:
+    @property
+    def db(self):
+        return _mongo_client.get_default_database()
+
+mongo = _MongoWrapper()
+
 # ── Extensions ──────────────────────────────────────────
-mongo = PyMongo(app)
 jwt = JWTManager(app)
 CORS(app, origins=[os.getenv("FRONTEND_URL", "http://localhost:5173")], supports_credentials=True)
 
@@ -30,6 +46,7 @@ from routes.wishlist_routes import wishlist_bp
 from routes.review_routes import review_bp
 from routes.owner_routes import owner_bp
 from routes.chat_routes import chat_bp
+from routes.credits_routes import credits_bp
 
 app.register_blueprint(auth_bp,     url_prefix="/api/auth")
 app.register_blueprint(listing_bp,  url_prefix="/api/listings")
@@ -37,6 +54,7 @@ app.register_blueprint(wishlist_bp, url_prefix="/api/wishlist")
 app.register_blueprint(review_bp,   url_prefix="/api/reviews")
 app.register_blueprint(owner_bp,    url_prefix="/api/owner")
 app.register_blueprint(chat_bp,     url_prefix="/api/chat")
+app.register_blueprint(credits_bp,  url_prefix="/api/credits")
 
 # ── Health check ─────────────────────────────────────────
 @app.route("/")
