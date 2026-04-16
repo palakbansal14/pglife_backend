@@ -73,4 +73,4 @@ def server_error(e):
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
     is_dev = os.getenv("FLASK_ENV", "development") == "development"
-    app.run(debug=is_dev, port=port)
+    app.run(debug=is_dev, port=port, host="0.0.0.0")
