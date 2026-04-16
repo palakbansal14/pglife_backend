@@ -14,7 +14,7 @@ app.url_map.strict_slashes = False
 
 # ── Config ──────────────────────────────────────────────
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "change-this-secret")
-from datetime import timedelta
+from datetime import timedelta, datetime
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=7)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB upload limit
 
@@ -40,21 +40,28 @@ CORS(app, origins="*")
 app.mongo = mongo
 
 # ── Register Blueprints ─────────────────────────────────
-from routes.auth_routes import auth_bp
-from routes.listing_routes import listing_bp
-from routes.wishlist_routes import wishlist_bp
-from routes.review_routes import review_bp
-from routes.owner_routes import owner_bp
-from routes.chat_routes import chat_bp
-from routes.credits_routes import credits_bp
+import traceback as _tb, sys as _sys
 
-app.register_blueprint(auth_bp,     url_prefix="/api/auth")
-app.register_blueprint(listing_bp,  url_prefix="/api/listings")
-app.register_blueprint(wishlist_bp, url_prefix="/api/wishlist")
-app.register_blueprint(review_bp,   url_prefix="/api/reviews")
-app.register_blueprint(owner_bp,    url_prefix="/api/owner")
-app.register_blueprint(chat_bp,     url_prefix="/api/chat")
-app.register_blueprint(credits_bp,  url_prefix="/api/credits")
+try:
+    from routes.auth_routes import auth_bp
+    from routes.listing_routes import listing_bp
+    from routes.wishlist_routes import wishlist_bp
+    from routes.review_routes import review_bp
+    from routes.owner_routes import owner_bp
+    from routes.chat_routes import chat_bp
+    from routes.credits_routes import credits_bp
+
+    app.register_blueprint(auth_bp,     url_prefix="/api/auth")
+    app.register_blueprint(listing_bp,  url_prefix="/api/listings")
+    app.register_blueprint(wishlist_bp, url_prefix="/api/wishlist")
+    app.register_blueprint(review_bp,   url_prefix="/api/reviews")
+    app.register_blueprint(owner_bp,    url_prefix="/api/owner")
+    app.register_blueprint(chat_bp,     url_prefix="/api/chat")
+    app.register_blueprint(credits_bp,  url_prefix="/api/credits")
+    print("✅ All blueprints registered successfully", file=_sys.stderr)
+except Exception as _e:
+    print(f"❌ BLUEPRINT ERROR: {_e}", file=_sys.stderr)
+    _tb.print_exc(file=_sys.stderr)
 
 # ── Health check ─────────────────────────────────────────
 @app.route("/")
