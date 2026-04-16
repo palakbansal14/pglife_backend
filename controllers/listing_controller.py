@@ -59,10 +59,12 @@ def get_listings():
     cursor = db.listings.find(query).sort(sort).skip((page - 1) * limit).limit(limit)
     listings = []
     for l in cursor:
-        # Listing cards: show owner name only — phone/address are gated behind unlock
+        # Listing cards: show owner name only — phone/address/title/locality are gated behind unlock
         owner = db.users.find_one({"_id": l.get("owner_id")}, {"name": 1, "owner_profile": 1})
         l["owner"] = owner
-        l.pop("address", None)  # never expose full address in listing cards
+        l.pop("address", None)    # never expose full address in listing cards
+        l.pop("title", None)      # title revealed only on unlocked detail page
+        l.pop("locality", None)   # exact area revealed only on unlocked detail page
         listings.append(serialize(l))
 
     return jsonify({
@@ -140,10 +142,10 @@ def get_listing(listing_id):
         listing_data.pop("address", None)
         if listing_data.get("owner"):
             listing_data["owner"].pop("phone", None)
-        listing_data["is_locked"] = True
-        listing_data["unlock_cost"] = UNLOCK_COST
+        listing_data["isLocked"] = True
+        listing_data["unlockCost"] = UNLOCK_COST
     else:
-        listing_data["is_locked"] = False
+        listing_data["isLocked"] = False
 
     return jsonify({"success": True, "listing": listing_data}), 200
 

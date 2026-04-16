@@ -14,15 +14,15 @@ app.url_map.strict_slashes = False
 
 # ── Config ──────────────────────────────────────────────
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "change-this-secret")
-app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False  # No expiry (or set timedelta)
+from datetime import timedelta
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=7)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB upload limit
 
 # ── MongoDB ──────────────────────────────────────────────
 _mongo_client = MongoClient(
     os.getenv("MONGO_URI"),
     tls=True,
-    tlsAllowInvalidCertificates=True,
-    tlsAllowInvalidHostnames=True,
+    tlsCAFile=certifi.where(),
 )
 
 class _MongoWrapper:
@@ -72,4 +72,5 @@ def server_error(e):
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    app.run(debug=True, port=port)
+    is_dev = os.getenv("FLASK_ENV", "development") == "development"
+    app.run(debug=is_dev, port=port)

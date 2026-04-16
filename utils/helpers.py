@@ -3,8 +3,14 @@ from datetime import datetime
 import random, string
 
 
+def _to_camel(name: str) -> str:
+    """Convert snake_case key to camelCase (e.g. monthly_rent → monthlyRent)."""
+    parts = name.split("_")
+    return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
 def serialize(doc):
-    """Recursively convert MongoDB doc to JSON-serializable dict."""
+    """Recursively convert MongoDB doc to JSON-serializable dict with camelCase keys."""
     if doc is None:
         return None
     if isinstance(doc, list):
@@ -12,16 +18,18 @@ def serialize(doc):
     if isinstance(doc, dict):
         result = {}
         for k, v in doc.items():
+            # _id stays as _id, all other keys go camelCase
+            camel_k = "_id" if k == "_id" else _to_camel(k)
             if k == "_id":
                 result["_id"] = str(v)
             elif isinstance(v, ObjectId):
-                result[k] = str(v)
+                result[camel_k] = str(v)
             elif isinstance(v, datetime):
-                result[k] = v.isoformat()
+                result[camel_k] = v.isoformat()
             elif isinstance(v, (dict, list)):
-                result[k] = serialize(v)
+                result[camel_k] = serialize(v)
             else:
-                result[k] = v
+                result[camel_k] = v
         return result
     return doc
 
