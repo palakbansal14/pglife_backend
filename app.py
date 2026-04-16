@@ -25,6 +25,10 @@ _mongo_client = MongoClient(
     tlsCAFile=certifi.where(),
 )
 
+@app.route('/')
+def home():
+    return {"message": "API working"}
+
 class _MongoWrapper:
     @property
     def db(self):
