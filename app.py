@@ -34,7 +34,7 @@ mongo = _MongoWrapper()
 
 # ── Extensions ──────────────────────────────────────────
 jwt = JWTManager(app)
-CORS(app, origins=[os.getenv("FRONTEND_URL", "http://localhost:5173")], supports_credentials=True)
+CORS(app, origins="*")
 
 # ── Make mongo accessible everywhere ────────────────────
 app.mongo = mongo
